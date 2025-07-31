@@ -9,6 +9,8 @@ pip install streamlit
 streamlit run app.py
 
 
+This utility takes as input a csv file, in which the bowling ball name, RG, diff, and intermediate diff need to be provided by the user. This utility will also need each bowling ball icon to be downloaded as a png file format and sized as 200 by 200 pixels. If no images are provided a default image is provided.
+
 
 -----------------------------
 Bowling Ball Definitions
