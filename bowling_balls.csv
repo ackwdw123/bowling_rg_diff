@@ -1,9 +1,9 @@
-Name,RG,Diff,Image
-Track Criterion,2.50,0.052,images/track_criterion.png
-Hammer Hazmat Solid,2.479,0.055,images/hazmat_solid.png
-Track Theorem,2.473,0.046,images/track_theorem.png
-Hammer Black Widow Mania,2.50,0.058,images/black_widow_mania.png
-Brunswick Vaporize,2.51,0.047,images/brunswick_vaporize.png
-Hammer Hazmat Pearl,2.479,0.055,images/hazmat_pearl.png
-Hammer Scorpion Strike,2.485,0.045,images/scorpion_strike.png
-
+Name,RG,Diff,IntDiff,Image
+Track Criterion,2.5,0.052,0.018,images/track_criterion.png
+Brunswick Combat,2.502,0.051,0.019,images/brunswick_combat.png
+Track Theorem,2.473,0.046,0.017,images/track_theorem.png
+Hammer Black Widow Mania,2.5,0.058,0.016,images/hammer_black_widow_mania.png
+Brunswick Vaporize,2.51,0.047,0.017,images/brunswick_vaporize.png
+Hammer Hazmat Pearl,2.479,0.055,0,images/hammer_hazmat_pearl.png
+Hammer Scorpion Strike,2.485,0.045,0,images/hammer_scorpion_strike.png
+Track Stealth,2.482,0.056,0,images/track_stealth.png
