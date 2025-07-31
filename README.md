@@ -6,7 +6,7 @@ To run this utility:
 pip install streamlit
 
 
-streamlit run bowling_ball_chart.py
+streamlit run app.py
 
 
 
