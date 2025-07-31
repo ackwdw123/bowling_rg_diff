@@ -47,4 +47,7 @@ Mediums: Best for “benchmark” balls that fit most house shots and medium spo
 
 
 
+![RG Diff Graph](bowling-rg-diff-graph.jpg)
+
+
 
