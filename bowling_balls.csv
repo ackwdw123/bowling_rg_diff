@@ -1,9 +1,8 @@
-Name,RG,Diff,IntDiff,Image
-Track Criterion,2.5,0.052,0.018,images/track_criterion.png
-Brunswick Combat,2.502,0.051,0.019,images/brunswick_combat.png
-Track Theorem,2.473,0.046,0.017,images/track_theorem.png
-Hammer Black Widow Mania,2.5,0.058,0.016,images/hammer_black_widow_mania.png
-Brunswick Vaporize,2.51,0.047,0.017,images/brunswick_vaporize.png
-Hammer Hazmat Pearl,2.479,0.055,0,images/hammer_hazmat_pearl.png
-Hammer Scorpion Strike,2.485,0.045,0,images/hammer_scorpion_strike.png
-Track Stealth,2.482,0.056,0,images/track_stealth.png
+Name,RG,Diff,IntDiff,Coverstock,CoverstockType,Type,Image,Speed,RevRate,PinToPAP,Recommended
+Track Criterion,2.50,0.052,0.018,QR-12 Solid (HK22C),Solid Reactive,Asymmetric,track_criterion.png,16,300,4,
+Brunswick Combat,2.474,0.054,0.016,Alpha Premier Pearl (HK22C),Pearl Reactive,Asymmetric,brunswick_combat.png,16,300,4,
+Track Theorem,2.47,0.053,0.016,Prime Response Hybrid (HK22),Hybrid Reactive,Asymmetric,track_theorem.png,16,300,4,
+Hammer Black Widow Mania,2.50,0.058,0.016,HK22 - Cohesion Pearl,Pearl Reactive,Asymmetric,black_widow_mania.png,16,300,4,
+Brunswick Vaporize,2.474,0.054,0.016,EVO Pearl (HK22C),Pearl Reactive,Asymmetric,brunswick_vaporize.png,16,300,4,
+Hammer Hazmat Pearl,2.479,0.047,,Semtex Pearl (HK22),Pearl Reactive,Symmetric,hazmat_pearl.png,16,300,4,
+Hammer Scorpion Strike,2.485,0.045,,Semtex Pearl (HK22),Pearl Reactive,Symmetric,scorpion_strike.png,16,300,4,
