@@ -184,3 +184,12 @@ st.write(
     "- **As lanes fully break down** → Use late transition ball with higher RG or pearl cover."
 )
 
+def lambda_handler(event, context):
+    # Start Streamlit server if not already running
+    os.system("streamlit run app.py --server.port 8080 --server.address 0.0.0.0 &")
+    return {
+        "statusCode": 200,
+        "headers": { "Content-Type": "text/html" },
+        "body": "<h3>Streamlit Bowling Analyzer is starting... Please refresh in a moment.</h3>"
+    }
+
