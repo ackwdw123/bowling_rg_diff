@@ -1,7 +1,6 @@
 Name,RG,Diff,IntDiff,Coverstock,CoverstockType,Type,Image,Speed,RevRate,PinToPAP,Recommended
 Track Criterion,2.50,0.052,0.018,QR-12 Solid (HK22C),Solid Reactive,Asymmetric,track_criterion.png,16,300,4,
 Brunswick Hammerhead,2.481,0.048,0,Aggression Solid,Solid Reactive,Symmetric,brunswick_hammerhead.png,16,300,4,
-Brunswick Combat,2.474,0.054,0.016,Alpha Premier Pearl (HK22C),Pearl Reactive,Asymmetric,brunswick_combat.png,16,300,4,
 Track Theorem,2.47,0.053,0.016,Prime Response Hybrid (HK22),Hybrid Reactive,Asymmetric,track_theorem.png,16,300,4,
 Hammer Black Widow Mania,2.50,0.058,0.016,HK22 - Cohesion Pearl,Pearl Reactive,Asymmetric,black_widow_mania.png,16,300,4,
 Brunswick Vaporize,2.474,0.054,0.016,EVO Pearl (HK22C),Pearl Reactive,Asymmetric,brunswick_vaporize.png,16,300,4,

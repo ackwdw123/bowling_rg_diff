@@ -3,16 +3,16 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os
 
-# 🖼️ Page layout
+# Page layout
 st.set_page_config(layout="wide")
 
-# Determine the current directory
+# Paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CSV_PATH = os.path.join(BASE_DIR, "bowling_balls.csv")
 IMAGES_DIR = os.path.join(BASE_DIR, "images")
 
 # Load CSV
-st.title("🎳 Bowling Ball Analyzer")
+st.title("Bowling Ball Analyzer & Recommendation System")
 uploaded_file = st.file_uploader("Upload a CSV file", type=["csv"])
 
 if uploaded_file:
@@ -61,17 +61,22 @@ st.subheader("RG/Diff Quadrant Classification")
 plot_all_quadrants(df)
 
 # --- Bowler Inputs ---
-oil_length = st.slider("Oil Pattern Length (ft)", 20, 55, 40)
-speed = st.selectbox("Ball Speed (mph)", [14, 15, 16, 17, 18])
-rev_rate = st.selectbox("Rev Rate (RPM)", [200, 300, 400, 500])
-pin_to_pap = st.selectbox("Pin-to-PAP (inches)", [3, 4, 5, 6])
-coverstock_input = st.selectbox(
-    "Preferred Coverstock Type",
-    ["Any", "Solid", "Hybrid", "Pearl", "Urethane"]
-)
+oil_length = st.slider("Oil Pattern Length (ft)", 20, 55, 40, 1)
+oil_volume = st.slider("Oil Volume (mL)", 18.0, 27.0, 22.0, 0.5)
+speed = st.slider("Ball Speed (mph)", 10.0, 20.0, 16.0, 0.5)
+rev_rate = st.slider("Rev Rate (RPM)", 100, 600, 300, 50)
+pin_to_pap = st.slider("Pin-to-PAP (inches)", 3.0, 6.0, 4.5, 0.5)
+
+# Determine lane condition
+if oil_length >= 45 or oil_volume >= 24:
+    lane_condition = "heavy"
+elif oil_length <= 35 or oil_volume <= 20:
+    lane_condition = "light"
+else:
+    lane_condition = "medium"
 
 # --- Scoring Function ---
-def score_ball(row, oil_length, speed, rev_rate, pin_to_pap, coverstock_input):
+def score_ball(row, oil_length, oil_volume, speed, rev_rate, pin_to_pap, role):
     rg = row['RG']
     diff = row['Diff']
     intdiff = row['IntDiff']
@@ -79,67 +84,81 @@ def score_ball(row, oil_length, speed, rev_rate, pin_to_pap, coverstock_input):
 
     score = 0
 
-    # --- Oil Pattern Matching ---
-    if oil_length <= 35:  # short
-        score += rg * 20                   # high RG for skid
-        score += (0.08 - diff) * 200       # lower diff = smoother
-        if intdiff == "Symmetrical Ball":
-            score += 20
-        if "pearl" in cover_type or "urethane" in cover_type:
-            score += 40
-    elif oil_length >= 45:  # long
-        score += (2 - rg) * 20             # low RG starts earlier
-        score += diff * 200                # high diff = flare
+    # Role-based logic
+    if role == "fresh":
+        # Fresh oil favors strong balls
+        score += (2.60 - rg) * 50        # low RG = more hook in oil
+        score += diff * 300              # high diff = more flare
         if intdiff != "Symmetrical Ball":
-            score += 20
-        if "solid" in cover_type or "hybrid" in cover_type:
-            score += 40
-    else:  # medium
+            score += 30                  # asym strong on fresh
+        if lane_condition == "heavy" and "solid" in cover_type:
+            score += 50
+        if lane_condition == "light" and ("pearl" in cover_type or "urethane" in cover_type):
+            score -= 50
+
+    elif role == "transition":
+        # Mid-lane breakdown prefers controllable shapes
+        score += (2.55 - abs(2.50 - rg)) * 40
+        score += (diff * 150)
+        if lane_condition == "medium":
+            if "hybrid" in cover_type or "pearl" in cover_type:
+                score += 40
+
+    elif role == "burned":
+        # Burned lanes prefer high RG / low diff / pearls or urethane
+        score += rg * 40
+        score += (0.08 - diff) * 300  # low diff better
+        if lane_condition == "light":
+            if "pearl" in cover_type or "urethane" in cover_type:
+                score += 80
+            if "solid" in cover_type or intdiff != "Symmetrical Ball":
+                score -= 50
+
+    # Speed & Rev adjustments
+    if speed >= 17 and "solid" in cover_type:
         score += 10
-        score += diff * 100
-        if "hybrid" in cover_type:
-            score += 20
+    elif speed <= 13 and ("pearl" in cover_type or "urethane" in cover_type):
+        score += 10
 
-    # --- Speed Matching ---
-    if speed >= 17:  # fast speed needs stronger balls
-        if "solid" in cover_type or intdiff != "Symmetrical Ball":
-            score += 20
-    else:  # slower speed needs length
-        if "pearl" in cover_type or intdiff == "Symmetrical Ball":
-            score += 20
+    rev_score = (rev_rate / 100) * diff * 5
+    score += rev_score
 
-    # --- Rev Rate Matching ---
-    score += (rev_rate / 100) * diff * 5
-
-    # --- Pin-to-PAP Matching ---
+    # Pin-to-PAP effect
     if pin_to_pap <= 4:
-        score += diff * 50  # more flare
+        score += diff * 50
     else:
-        score += (0.08 - diff) * 50  # smoother backend
-
-    # --- Coverstock Preference Weighting ---
-    if coverstock_input != "Any" and coverstock_input.lower() in cover_type:
-        score += 50  # strong preference match
+        score += (0.08 - diff) * 50
 
     return score
 
-# --- Recommend Ball ---
-df["Score"] = df.apply(
-    lambda row: score_ball(row, oil_length, speed, rev_rate, pin_to_pap, coverstock_input),
-    axis=1
-)
-recommended_ball = df.sort_values("Score", ascending=False).iloc[0]
+# --- Recommend 3 Balls ---
+roles = ["fresh", "transition", "burned"]
+recommendations = {}
 
-st.markdown("## 🎯 Recommended Ball")
-st.write(f"**{recommended_ball['Name']}**")
-st.write(f"RG: {recommended_ball['RG']}, Diff: {recommended_ball['Diff']}, IntDiff: {recommended_ball['IntDiff']}")
-st.write(f"Coverstock: {recommended_ball.get('Coverstock', 'Unknown')} ({recommended_ball.get('CoverstockType', 'Unknown')})")
+for role in roles:
+    df[role + "_score"] = df.apply(
+        lambda row: score_ball(row, oil_length, oil_volume, speed, rev_rate, pin_to_pap, role),
+        axis=1
+    )
+    recommendations[role] = df.sort_values(role + "_score", ascending=False).iloc[0]
 
-# Display image
-image_filename = recommended_ball['Name'].lower().replace(" ", "_") + ".png"
-image_path = os.path.join(IMAGES_DIR, image_filename)
-if os.path.exists(image_path):
-    st.image(image_path, caption=recommended_ball['Name'], width=250)
-else:
-    st.warning("Recommended ball image not found.")
+# --- Display Recommendations ---
+st.markdown("## 🎳 Recommended Arsenal")
+for role in roles:
+    ball = recommendations[role]
+    role_label = {"fresh": "Fresh Oil (First Ball)", 
+                  "transition": "Transition (Second Ball)",
+                  "burned": "Burned Lanes (Third Ball)"}
+    
+    st.subheader(role_label[role])
+    st.write(f"**{ball['Name']}**")
+    st.write(f"RG: {ball['RG']}, Diff: {ball['Diff']}, IntDiff: {ball['IntDiff']}")
+    st.write(f"Coverstock: {ball.get('Coverstock', 'Unknown')} ({ball.get('CoverstockType', 'Unknown')})")
+    
+    image_filename = ball['Name'].lower().replace(" ", "_") + ".png"
+    image_path = os.path.join(IMAGES_DIR, image_filename)
+    if os.path.exists(image_path):
+        st.image(image_path, caption=ball['Name'], width=250)
+    else:
+        st.warning("Ball image not found.")
 
