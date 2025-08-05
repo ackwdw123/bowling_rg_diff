@@ -3,7 +3,7 @@ name: Deploy Streamlit App
 on:
   push:
     branches:
-      - main  # Run this workflow only when pushing to the main branch
+      - main
 
 jobs:
   deploy:
@@ -13,18 +13,16 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      # Step 1: Copy files to EC2 using SSH
       - name: Deploy to EC2
         uses: easingthemes/ssh-deploy@v2
         with:
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_KEY }}   # Private key for EC2
-          REMOTE_HOST: ${{ secrets.SERVER_IP }}     # Your EC2 Elastic IP
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_KEY }}
+          REMOTE_HOST: ${{ secrets.SERVER_IP }}
           REMOTE_USER: ubuntu
           REMOTE_PORT: 22
-          SOURCE: .                                 # Push everything in repo
-          TARGET: /home/ubuntu/bowlingapp           # App directory on EC2
+          SOURCE: .
+          TARGET: /home/ubuntu/bowlingapp
 
-      # Step 2: Run commands on EC2 to restart Streamlit
       - name: Restart Streamlit App
         uses: appleboy/ssh-action@v0.1.10
         with:
@@ -33,15 +31,13 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           script: |
             cd /home/ubuntu/bowlingapp
-            # Activate your Python environment if you use one
+            # Optional: activate venv
             if [ -d "venv" ]; then
               source venv/bin/activate
             fi
-            # Install/Update requirements
             pip3 install --upgrade pip
             if [ -f "requirements.txt" ]; then
               pip3 install -r requirements.txt
             fi
-            # Restart the Streamlit app via systemd
             sudo systemctl restart streamlit
 
