@@ -3,50 +3,36 @@ name: Deploy to EC2
 on:
   push:
     branches:
-      - main   # Trigger deploys on pushes to main
+      - main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout repository
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      # 1. Checkout code
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      # 2. Copy files to EC2
-      - name: Copy files to EC2
-        uses: appleboy/scp-action@v0.1.7
+      # 2. Deploy to EC2 with rsync
+      - name: Sync files to EC2
+        uses: burnett01/rsync-deployments@7.0.1
         with:
-          host: ${{ secrets.SERVER_IP }}
-          username: ubuntu
-          key: ${{ secrets.SSH_KEY }}
-          source: "."
-          target: "/home/ubuntu/bowlingapp"
+          switches: -avzr --delete
+          path: ./
+          remote_path: /home/ubuntu/bowlingapp/
+          remote_host: ${{ secrets.SERVER_IP }}
+          remote_user: ubuntu
+          remote_key: ${{ secrets.SSH_KEY }}
 
-      # 3. Connect to EC2 and restart Streamlit
-      - name: Restart Streamlit on EC2
+      # 3. Restart Streamlit on EC2
+      - name: Restart Streamlit App
         uses: appleboy/ssh-action@v0.1.10
         with:
           host: ${{ secrets.SERVER_IP }}
           username: ubuntu
           key: ${{ secrets.SSH_KEY }}
           script: |
-            cd /home/ubuntu/bowlingapp
-
-            # Setup virtual environment if it doesn't exist
-            if [ ! -d "venv" ]; then
-              python3 -m venv venv
-            fi
-            source venv/bin/activate
-
-            # Upgrade pip and install dependencies
-            pip install --upgrade pip
-            if [ -f "requirements.txt" ]; then
-              pip install -r requirements.txt
-            fi
-
-            # Restart Streamlit service (ensure you have a systemd service set up)
-            sudo systemctl restart streamlit
-            echo "✅ Deployment and Streamlit restart complete!"
+            pkill -f streamlit || true
+            nohup streamlit run /home/ubuntu/bowlingapp/app/app.py --server.port 8501 --server.headless true > /home/ubuntu/bowlingapp/streamlit.log 2>&1 &
 
