@@ -1,29 +1,31 @@
-name: Deploy Streamlit App
+name: Deploy to EC2
 
 on:
   push:
     branches:
-      - main
+      - main   # Trigger deploys on pushes to main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Code
+      # 1. Checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Deploy to EC2
-        uses: easingthemes/ssh-deploy@v2
+      # 2. Copy files to EC2
+      - name: Copy files to EC2
+        uses: appleboy/scp-action@v0.1.7
         with:
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_KEY }}
-          REMOTE_HOST: ${{ secrets.SERVER_IP }}
-          REMOTE_USER: ubuntu
-          REMOTE_PORT: 22
-          SOURCE: .
-          TARGET: /home/ubuntu/bowlingapp
+          host: ${{ secrets.SERVER_IP }}
+          username: ubuntu
+          key: ${{ secrets.SSH_KEY }}
+          source: "."
+          target: "/home/ubuntu/bowlingapp"
 
-      - name: Restart Streamlit App
+      # 3. Connect to EC2 and restart Streamlit
+      - name: Restart Streamlit on EC2
         uses: appleboy/ssh-action@v0.1.10
         with:
           host: ${{ secrets.SERVER_IP }}
@@ -31,13 +33,20 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           script: |
             cd /home/ubuntu/bowlingapp
-            # Optional: activate venv
-            if [ -d "venv" ]; then
-              source venv/bin/activate
+
+            # Setup virtual environment if it doesn't exist
+            if [ ! -d "venv" ]; then
+              python3 -m venv venv
             fi
-            pip3 install --upgrade pip
+            source venv/bin/activate
+
+            # Upgrade pip and install dependencies
+            pip install --upgrade pip
             if [ -f "requirements.txt" ]; then
-              pip3 install -r requirements.txt
+              pip install -r requirements.txt
             fi
+
+            # Restart Streamlit service (ensure you have a systemd service set up)
             sudo systemctl restart streamlit
+            echo "✅ Deployment and Streamlit restart complete!"
 
