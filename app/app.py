@@ -3,37 +3,94 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os
 
-# Page layout
+# --- Page Layout ---
 st.set_page_config(layout="wide")
+st.title("Bowling Ball Analyzer & Recommendation System")
 
-# Paths
+# --- Paths ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CSV_PATH = os.path.join(BASE_DIR, "bowling_balls.csv")
 IMAGES_DIR = os.path.join(BASE_DIR, "images")
 
-# Load CSV
-st.title("Bowling Ball Analyzer & Recommendation System")
-uploaded_file = st.file_uploader("Upload a CSV file", type=["csv"])
+# --- Instructions & Template Download ---
+st.markdown("""
+### 📄 Instructions
+1. Ensure your bowling ball data file is named **`bowling_balls.csv`**.
+2. You can **upload a new CSV file** below to analyze different data.
+3. A **template CSV** is available for download to help format your file.
+4. Ball images may not always appear because no full image library is included.
+""")
 
+# Offer download of existing CSV as a template
+if os.path.exists(CSV_PATH):
+    with open(CSV_PATH, "rb") as f:
+        st.download_button(
+            label="📥 Download Template CSV (bowling_balls.csv)",
+            data=f,
+            file_name="bowling_balls.csv",
+            mime="text/csv"
+        )
+else:
+    st.warning("Template CSV not found in the app directory.")
+
+# --- File Upload Section ---
+uploaded_file = st.file_uploader("Upload your bowling_balls.csv file", type=["csv"])
+
+# Load CSV
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
 elif os.path.exists(CSV_PATH):
     df = pd.read_csv(CSV_PATH)
 else:
-    st.error("No CSV file found.")
+    st.error("No CSV file found. Please upload bowling_balls.csv or place it in the app directory.")
     st.stop()
 
 # Normalize IntDiff for symmetrical balls
 if "IntDiff" in df.columns:
     df["IntDiff"] = df["IntDiff"].fillna("Symmetrical Ball")
 
-# Lane surfaces with SR and Ra from USBC studies (adjusted for separation)
+# Lane surfaces with SR, Ra, and descriptions
 LANE_SURFACES = {
-    "Wood": {"SR": 1.9, "Ra": 0.8},
-    "Guardian Overlay": {"SR": 1.7, "Ra": 0.65},
-    "HPL": {"SR": 1.5, "Ra": 0.45},
-    "Pro Anvilane": {"SR": 1.3, "Ra": 0.25},
-    "SPL": {"SR": 1.35, "Ra": 0.3}
+    "Wood (New)": {
+        "SR": 2.0, "Ra": 0.85,
+        "Description": "Traditional wood surface, high friction, strong backend reaction.",
+        "Effect": "Great for slower speed or low rev bowlers."
+    },
+    "Wood (Old)": {
+        "SR": 1.8, "Ra": 0.75,
+        "Description": "Worn wood lanes, moderate friction, can create early hook.",
+        "Effect": "Urethane and weaker pearls work well here."
+    },
+    "Guardian Overlay": {
+        "SR": 1.7, "Ra": 0.65,
+        "Description": "Plastic overlay on wood to protect heads; reduces friction.",
+        "Effect": "Early hook control; best with medium or stronger equipment."
+    },
+    "AMF SPL": {
+        "SR": 1.35, "Ra": 0.30,
+        "Description": "Older synthetic surface with medium-low friction.",
+        "Effect": "Pearls and hybrids excel on transition and burn."
+    },
+    "AMF HPL": {
+        "SR": 1.5, "Ra": 0.45,
+        "Description": "High-pressure laminate synthetic, medium friction.",
+        "Effect": "Balanced; works for most modern equipment."
+    },
+    "Brunswick Anvilane 1": {
+        "SR": 1.4, "Ra": 0.35,
+        "Description": "First generation Anvilane; lower friction than wood.",
+        "Effect": "Longer oil hold; stronger balls needed on fresh oil."
+    },
+    "Brunswick Anvilane 2": {
+        "SR": 1.35, "Ra": 0.30,
+        "Description": "Second generation Anvilane; slightly slicker.",
+        "Effect": "Delayed hook; pearls and hybrids for transition."
+    },
+    "Brunswick Pro Anvilane": {
+        "SR": 1.3, "Ra": 0.25,
+        "Description": "Modern low-friction surface, holds oil very well.",
+        "Effect": "Requires stronger coverstocks for traction on fresh."
+    }
 }
 
 # --- Quadrant Plot ---
@@ -77,21 +134,24 @@ rev_rate = st.slider("Rev Rate (RPM)", 100, 600, 300, 50)
 pin_to_pap = st.slider("Pin-to-PAP (inches)", 3.0, 6.0, 4.5, 0.5)
 lane_type = st.selectbox("Lane Surface Type", list(LANE_SURFACES.keys()))
 
-# Calculate lane friction index (Weighted SR–Ra formula)
 lane_props = LANE_SURFACES[lane_type]
 lane_friction_index = (lane_props["SR"] - lane_props["Ra"]) * 1.5
 
-# Display lane friction indicator
-if lane_friction_index >= 1.5:
-    friction_color = "🟥 High Friction"
-elif lane_friction_index >= 1.2:
-    friction_color = "🟧 Medium-High Friction"
-elif lane_friction_index >= 1.0:
-    friction_color = "🟨 Medium Friction"
-else:
-    friction_color = "🟩 Low Friction"
+st.markdown(f"""
+**Lane Type:** {lane_type}  
+*Description:* {lane_props["Description"]}  
+*Effect on Ball Motion:* {lane_props["Effect"]}  
+**Lane Friction Index:** {lane_friction_index:.2f}
+""")
 
-st.markdown(f"**Lane Friction Index:** {lane_friction_index:.2f} {friction_color}")
+if lane_friction_index >= 1.5:
+    st.markdown("🟥 **High Friction**")
+elif lane_friction_index >= 1.2:
+    st.markdown("🟧 **Medium-High Friction**")
+elif lane_friction_index >= 1.0:
+    st.markdown("🟨 **Medium Friction**")
+else:
+    st.markdown("🟩 **Low Friction**")
 
 # Determine lane condition
 if oil_length >= 45 or oil_volume >= 24:
@@ -109,12 +169,9 @@ def score_ball(row, oil_length, oil_volume, speed, rev_rate, pin_to_pap, lane_fr
     cover_type = str(row.get('CoverstockType', 'Unknown')).lower()
 
     score = 0
-
-    # Adjust baseline strength by lane friction
-    # Higher friction favors weaker balls
     friction_adjustment = 1 - (lane_friction_index - 1.0) * 0.2
 
-    # Role-based logic
+    # Role-based scoring
     if role == "fresh":
         score += (2.60 - rg) * 50 * friction_adjustment
         score += diff * 300
@@ -171,7 +228,7 @@ for role in roles:
 
 # --- Display Recommendations ---
 st.markdown("## 🎳 Recommended Arsenal")
-for role in roles:
+for i, role in enumerate(roles):
     ball = recommendations[role]
     role_label = {
         "fresh": "Fresh Oil (First Ball)", 
@@ -190,4 +247,8 @@ for role in roles:
         st.image(image_path, caption=ball['Name'], width=250)
     else:
         st.warning("Ball image not found.")
+    
+    # --- Purple Horizontal Divider between sections ---
+    if i < len(roles) - 1:
+        st.markdown("<hr style='border: 2px solid purple;'>", unsafe_allow_html=True)
 
