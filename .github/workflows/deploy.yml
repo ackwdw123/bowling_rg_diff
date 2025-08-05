@@ -1,0 +1,27 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Deploy via SSH
+        uses: easingthemes/ssh-deploy@v2.2.11
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+          remote-user: ubuntu
+          server-ip: YOUR_EC2_PUBLIC_IP
+          remote-path: /home/ubuntu/bowling_rg_diff
+          local-path: .
+          pre-deploy: |
+            pkill -f streamlit || true
+          post-deploy: |
+            nohup streamlit run app.py --server.port 8501 &
+

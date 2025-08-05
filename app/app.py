@@ -27,6 +27,15 @@ else:
 if "IntDiff" in df.columns:
     df["IntDiff"] = df["IntDiff"].fillna("Symmetrical Ball")
 
+# Lane surfaces with SR and Ra from USBC studies (adjusted for separation)
+LANE_SURFACES = {
+    "Wood": {"SR": 1.9, "Ra": 0.8},
+    "Guardian Overlay": {"SR": 1.7, "Ra": 0.65},
+    "HPL": {"SR": 1.5, "Ra": 0.45},
+    "Pro Anvilane": {"SR": 1.3, "Ra": 0.25},
+    "SPL": {"SR": 1.35, "Ra": 0.3}
+}
+
 # --- Quadrant Plot ---
 def plot_all_quadrants(df):
     fig, ax = plt.subplots(figsize=(5, 5))
@@ -66,6 +75,23 @@ oil_volume = st.slider("Oil Volume (mL)", 18.0, 27.0, 22.0, 0.5)
 speed = st.slider("Ball Speed (mph)", 10.0, 20.0, 16.0, 0.5)
 rev_rate = st.slider("Rev Rate (RPM)", 100, 600, 300, 50)
 pin_to_pap = st.slider("Pin-to-PAP (inches)", 3.0, 6.0, 4.5, 0.5)
+lane_type = st.selectbox("Lane Surface Type", list(LANE_SURFACES.keys()))
+
+# Calculate lane friction index (Weighted SR–Ra formula)
+lane_props = LANE_SURFACES[lane_type]
+lane_friction_index = (lane_props["SR"] - lane_props["Ra"]) * 1.5
+
+# Display lane friction indicator
+if lane_friction_index >= 1.5:
+    friction_color = "🟥 High Friction"
+elif lane_friction_index >= 1.2:
+    friction_color = "🟧 Medium-High Friction"
+elif lane_friction_index >= 1.0:
+    friction_color = "🟨 Medium Friction"
+else:
+    friction_color = "🟩 Low Friction"
+
+st.markdown(f"**Lane Friction Index:** {lane_friction_index:.2f} {friction_color}")
 
 # Determine lane condition
 if oil_length >= 45 or oil_volume >= 24:
@@ -76,7 +102,7 @@ else:
     lane_condition = "medium"
 
 # --- Scoring Function ---
-def score_ball(row, oil_length, oil_volume, speed, rev_rate, pin_to_pap, role):
+def score_ball(row, oil_length, oil_volume, speed, rev_rate, pin_to_pap, lane_friction_index, role):
     rg = row['RG']
     diff = row['Diff']
     intdiff = row['IntDiff']
@@ -84,28 +110,29 @@ def score_ball(row, oil_length, oil_volume, speed, rev_rate, pin_to_pap, role):
 
     score = 0
 
+    # Adjust baseline strength by lane friction
+    # Higher friction favors weaker balls
+    friction_adjustment = 1 - (lane_friction_index - 1.0) * 0.2
+
     # Role-based logic
     if role == "fresh":
-        # Fresh oil favors strong balls
-        score += (2.60 - rg) * 50        # low RG = more hook in oil
-        score += diff * 300              # high diff = more flare
+        score += (2.60 - rg) * 50 * friction_adjustment
+        score += diff * 300
         if intdiff != "Symmetrical Ball":
-            score += 30                  # asym strong on fresh
+            score += 30
         if lane_condition == "heavy" and "solid" in cover_type:
             score += 50
         if lane_condition == "light" and ("pearl" in cover_type or "urethane" in cover_type):
             score -= 50
 
     elif role == "transition":
-        # Mid-lane breakdown prefers controllable shapes
-        score += (2.55 - abs(2.50 - rg)) * 40
+        score += (2.55 - abs(2.50 - rg)) * 40 * friction_adjustment
         score += (diff * 150)
         if lane_condition == "medium":
             if "hybrid" in cover_type or "pearl" in cover_type:
                 score += 40
 
     elif role == "burned":
-        # Burned lanes prefer high RG / low diff / pearls or urethane
         score += rg * 40
         score += (0.08 - diff) * 300  # low diff better
         if lane_condition == "light":
@@ -137,7 +164,7 @@ recommendations = {}
 
 for role in roles:
     df[role + "_score"] = df.apply(
-        lambda row: score_ball(row, oil_length, oil_volume, speed, rev_rate, pin_to_pap, role),
+        lambda row: score_ball(row, oil_length, oil_volume, speed, rev_rate, pin_to_pap, lane_friction_index, role),
         axis=1
     )
     recommendations[role] = df.sort_values(role + "_score", ascending=False).iloc[0]
@@ -146,9 +173,11 @@ for role in roles:
 st.markdown("## 🎳 Recommended Arsenal")
 for role in roles:
     ball = recommendations[role]
-    role_label = {"fresh": "Fresh Oil (First Ball)", 
-                  "transition": "Transition (Second Ball)",
-                  "burned": "Burned Lanes (Third Ball)"}
+    role_label = {
+        "fresh": "Fresh Oil (First Ball)", 
+        "transition": "Transition (Second Ball)",
+        "burned": "Burned Lanes (Third Ball)"
+    }
     
     st.subheader(role_label[role])
     st.write(f"**{ball['Name']}**")
