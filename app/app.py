@@ -42,15 +42,37 @@ def slugify_name(name: str) -> str:
     s = re.sub(r"_+", "_", s).strip("_")
     return s
 
-def find_image_path(name: str):
-    """Try to find an image for the given ball name across common extensions."""
-    stem = slugify_name(name)
+def sanitize_filename(value: str) -> str:
+    """Sanitize an Image filename from CSV (trim/normalize)."""
+    value = normalize_text(value)
+    # Prevent path traversal and odd chars
+    value = value.replace("\\", "/").split("/")[-1]
+    return value
+
+def try_paths_for_image(primary_filename: str, name_fallback: str):
+    """
+    Try the explicit Image filename first (if provided),
+    then fall back to slugified Name across common extensions.
+    Return (found_path, tried_paths_list).
+    """
+    tried = []
+    # 1) Try given filename as-is (if provided)
+    if primary_filename:
+        p = os.path.join(IMAGES_DIR, sanitize_filename(primary_filename))
+        tried.append(p)
+        if os.path.exists(p):
+            return p, tried
+
+    # 2) Fall back: slugified name + common extensions
+    stem = slugify_name(name_fallback)
     exts = [".png", ".jpg", ".jpeg", ".webp"]
-    candidates = [os.path.join(IMAGES_DIR, stem + ext) for ext in exts]
-    for path in candidates:
-        if os.path.exists(path):
-            return path, candidates
-    return None, candidates
+    for ext in exts:
+        p = os.path.join(IMAGES_DIR, stem + ext)
+        tried.append(p)
+        if os.path.exists(p):
+            return p, tried
+
+    return None, tried
 
 def expected_roll(row, lane_friction_index, lane_type, lane_condition):
     parts = []
@@ -98,7 +120,7 @@ def expected_roll(row, lane_friction_index, lane_type, lane_condition):
 st.markdown("""
 **Instructions:**
 1. Upload a custom `bowling_balls.csv` file to analyze your arsenal.
-2. If a ball image is missing, upload a `.png/.jpg/.jpeg/.webp` below. The filename should match the ball name after normalization: lowercase, spaces → underscores, punctuation removed.
+2. If a ball image is missing, upload a `.png/.jpg/.jpeg/.webp` below. The filename should match the CSV `Image` column, or the ball name normalized (lowercase, spaces → underscores).
 3. You can also download your current `bowling_balls.csv` as a template.
 """)
 
@@ -126,7 +148,7 @@ else:
 required_cols = ["Name", "RG", "Diff"]
 for c in required_cols:
     if c not in df.columns:
-        st.error("CSV must contain at least: Name, RG, Diff (optional: IntDiff, Coverstock, CoverstockType).")
+        st.error("CSV must contain at least: Name, RG, Diff (optional: IntDiff, Coverstock, CoverstockType, Image).")
         st.stop()
 
 # Normalize columns
@@ -168,7 +190,11 @@ def plot_all_quadrants(df):
     missing = []
     for _, row in valid.iterrows():
         rg, diff, name = row["RG"], row["Diff"], row["Name"]
-        img_path, tried = find_image_path(name)
+        image_col = None
+        if "Image" in row and isinstance(row["Image"], str) and row["Image"].strip():
+            image_col = row["Image"]
+
+        img_path, tried = try_paths_for_image(image_col, name)
         if img_path:
             img = plt.imread(img_path)
             ax.imshow(img, extent=(rg-0.002, rg+0.002, diff-0.0008, diff+0.0008), aspect='auto', zorder=2)
@@ -243,6 +269,14 @@ else:
     lane_condition = "medium"
 
 # ---------- Scoring ----------
+def asym_bonus_by_condition():
+    # Asymmetry useful, but don't overpower low-RG/high-diff solids
+    if lane_condition == "heavy":
+        return 10
+    if lane_condition == "medium":
+        return 20
+    return -10  # light: asym can be too jumpy on friction
+
 def score_ball(row, role):
     rg = row['RG']
     diff = row['Diff']
@@ -252,24 +286,25 @@ def score_ball(row, role):
     friction_adjust = 1 - (lane_friction_index - 1.0) * 0.2
 
     if role == "fresh":
-        score += (2.60 - rg) * 50 * friction_adjust
-        score += diff * 300
+        # Stronger weighting for low RG & high diff on fresh
+        score += (2.60 - rg) * 120 * friction_adjust
+        score += diff * 400
         if intdiff != "Symmetrical Ball":
-            score += 30
+            score += asym_bonus_by_condition()
         if lane_condition == "heavy" and "solid" in cover_type:
             score += 50
         if lane_condition == "light" and ("pearl" in cover_type or "urethane" in cover_type):
             score -= 50
 
     elif role == "transition":
-        score += (2.55 - abs(2.50 - rg)) * 40 * friction_adjust
-        score += diff * 150
+        score += (2.55 - abs(2.50 - rg)) * 60 * friction_adjust
+        score += diff * 180
         if lane_condition == "medium" and ("hybrid" in cover_type or "pearl" in cover_type):
             score += 40
 
     elif role == "burned":
-        score += rg * 40
-        score += (0.08 - diff) * 300
+        score += rg * 60
+        score += (0.08 - diff) * 400
         if lane_condition == "light":
             if "pearl" in cover_type or "urethane" in cover_type:
                 score += 80
@@ -318,11 +353,11 @@ for idx, role in enumerate(roles):
         f"**Expected ball roll on lane type chosen:** "
         f"{expected_roll(ball, lane_friction_index, lane_type, lane_condition)}"
     )
-    img_path, candidates = find_image_path(ball['Name'])
+    img_path, tried = try_paths_for_image(ball.get("Image", ""), ball['Name'])
     if img_path:
         st.image(img_path, caption=ball['Name'], width=250)
     else:
-        st.caption("Image not found. Tried: " + ", ".join([os.path.basename(p) for p in candidates]))
+        st.caption("Image not found. Tried: " + ", ".join([os.path.basename(p) for p in tried]))
 
     if idx < len(roles) - 1:
         st.markdown("<hr style='border:2px solid purple'>", unsafe_allow_html=True)
@@ -346,21 +381,9 @@ for _, row in not_chosen_df.iterrows():
         f"**Expected ball roll on lane type chosen:** "
         f"{expected_roll(row, lane_friction_index, lane_type, lane_condition)}"
     )
-    img_path, candidates = find_image_path(row['Name'])
+    img_path, tried = try_paths_for_image(row.get("Image", ""), row['Name'])
     if img_path:
         st.image(img_path, caption=row['Name'], width=200)
     else:
-        st.caption("Image not found. Tried: " + ", ".join([os.path.basename(p) for p in candidates]))
+        st.caption("Image not found. Tried: " + ", ".join([os.path.basename(p) for p in tried]))
     st.markdown("---")
-
-# ---------- Utilities ----------
-col1, col2 = st.columns(2)
-with col1:
-    if st.button("🔁 Force reload (clear cache)"):
-        try:
-            st.cache_data.clear()
-        except Exception:
-            pass
-        st.experimental_rerun()
-with col2:
-    st.write(" ")
