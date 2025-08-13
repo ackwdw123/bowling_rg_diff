@@ -93,6 +93,15 @@ def expected_roll(row, lane_friction_index, lane_type, lane_condition):
 
     return "; ".join(parts)
 
+def zscore(series, clip=2.0):
+    """Dataset-aware normalization with gentle clipping."""
+    s = pd.Series(series, dtype=float)
+    sd = s.std(ddof=0)
+    if pd.isna(sd) or sd == 0:
+        return pd.Series([0.0] * len(s), index=s.index)
+    z = (s - s.mean()) / sd
+    return z.clip(-clip, clip)
+
 # =========================
 # Title + Instructions
 # =========================
@@ -206,7 +215,7 @@ def plot_all_quadrants(df_in):
     ax.tick_params(axis='both', labelsize=6)
     st.pyplot(fig)
 
-    # ---- Quadrant Definitions (inserted here, between graph and images expander) ----
+    # ---- Quadrant Definitions (between graph and images expander)
     st.markdown("### Quadrant Definitions")
     st.markdown(
         """
@@ -273,58 +282,94 @@ else:
     lane_condition = "medium"
 
 # =========================
-# Scoring
+# Scoring (z-score based to reduce one-ball dominance)
 # =========================
 def score_ball(row, oil_length, oil_volume, speed, rev_rate, pin_to_pap, lane_friction_index, role):
-    rg = row['RG']
-    diff = row['Diff']
+    # Normalize cover type
+    cover_type_raw = str(row.get('CoverstockType', 'Unknown')).lower()
+    is_solid  = "solid"  in cover_type_raw
+    is_pearl  = "pearl"  in cover_type_raw
+    is_hybrid = "hybrid" in cover_type_raw
+    is_urethane = "urethane" in cover_type_raw
+
+    rg   = float(row['RG'])
+    diff = float(row['Diff'])
     intdiff = row['IntDiff']
-    cover_type = str(row.get('CoverstockType', 'Unknown')).lower()
-    score = 0
+
+    # Dataset-aware z-scores
+    rg_z   = float(zscore(df['RG']).loc[row.name])     # low RG (negative) = earlier revs
+    diff_z = float(zscore(df['Diff']).loc[row.name])   # high diff (positive) = more flare
+
     friction_adjustment = 1 - (lane_friction_index - 1.0) * 0.2
 
+    score = 0.0
+
     if role == "fresh":
-        score += (2.60 - rg) * 50 * friction_adjustment
-        score += diff * 300
+        # Favor low RG (early revs) and higher diff, but through z-scores
+        score += (-rg_z) * 55 * friction_adjustment
+        score += (+diff_z) * 180
+        # Core bias (toned down)
         if intdiff != "Symmetrical Ball":
-            score += 30
-        if lane_condition == "heavy" and "solid" in cover_type:
-            score += 50
-        if lane_condition == "light" and ("pearl" in cover_type or "urethane" in cover_type):
-            score -= 50
-    elif role == "transition":
-        score += (2.55 - abs(2.50 - rg)) * 40 * friction_adjustment
-        score += diff * 150
-        if lane_condition == "medium" and ("hybrid" in cover_type or "pearl" in cover_type):
+            score += 10
+        else:
+            score += 15
+        # Covers by condition
+        if lane_condition == "heavy" and is_solid:
             score += 40
+        if lane_condition == "light" and (is_pearl or is_urethane):
+            score -= 25
+
+    elif role == "transition":
+        # Near mid RG and usable flare
+        mid_rg_pull = 2.50
+        score += (1 - abs(rg - mid_rg_pull) / 0.06) * 50 * friction_adjustment
+        score += (+diff_z) * 90
+        if lane_condition == "medium" and (is_hybrid or is_pearl):
+            score += 30
+        # Hybrids can be too responsive on light/burn
+        if lane_condition == "light" and is_hybrid:
+            score -= 15
+
     elif role == "burned":
-        score += rg * 40
-        score += (0.08 - diff) * 300
+        # Later roll: higher RG and lower diff
+        score += (+rg_z) * 60
+        score += (-diff_z) * 220
         if lane_condition == "light":
-            if "pearl" in cover_type or "urethane" in cover_type:
-                score += 80
-            if "solid" in cover_type or intdiff != "Symmetrical Ball":
-                score -= 50
+            if is_pearl or is_urethane:
+                score += 60
+            if is_solid or intdiff != "Symmetrical Ball":
+                score -= 35
 
-    if speed >= 17 and "solid" in cover_type:
-        score += 10
-    elif speed <= 13 and ("pearl" in cover_type or "urethane" in cover_type):
-        score += 10
+    # Speed/Rev tuning
+    if speed >= 17 and is_solid:
+        score += 8
+    elif speed <= 13 and (is_pearl or is_urethane):
+        score += 8
 
-    score += (rev_rate / 100) * diff * 5
-
-    if pin_to_pap <= 4:
-        score += diff * 50
+    score += (rev_rate / 100.0) * diff * 4.5
+    if pin_to_pap <= 4.0:
+        score += diff * 40
     else:
-        score += (0.08 - diff) * 50
+        score += (0.08 - diff) * 40
 
     return score
 
 roles = ["fresh", "transition", "burned"]
 recommendations = {}
 for role in roles:
-    df[role + "_score"] = df.apply(lambda row: score_ball(row, oil_length, oil_volume, speed, rev_rate, pin_to_pap, lane_friction_index, role), axis=1)
+    df[role + "_score"] = df.apply(
+        lambda row: score_ball(row, oil_length, oil_volume, speed, rev_rate, pin_to_pap, lane_friction_index, role),
+        axis=1
+    )
     recommendations[role] = df.sort_values(role + "_score", ascending=False).iloc[0]
+
+# Optional: quick visibility into rankings
+with st.expander("🔍 Debug: Top 5 by role"):
+    for role in roles:
+        cols = ["Name", "RG", "Diff", "IntDiff", "CoverstockType", f"{role}_score"]
+        top5 = df.sort_values(f"{role}_score", ascending=False)[cols].head(5)
+        st.write(f"**{role.title()}**")
+        st.dataframe(top5, use_container_width=True)
 
 # =========================
 # Recommended Arsenal
@@ -344,7 +389,6 @@ for idx, role in enumerate(roles):
     st.write(f"Score: {ball[role + '_score']:.2f}")
     st.write(f"Expected ball roll on lane type chosen: {expected_roll(ball, lane_friction_index, lane_type, lane_condition)}")
 
-    # Robust image resolution (CSV Image column or slug fallback)
     img_path, _ = try_paths_for_image(ball.get("Image", ""), ball["Name"])
     if img_path:
         st.image(img_path, caption=ball['Name'], width=250)
