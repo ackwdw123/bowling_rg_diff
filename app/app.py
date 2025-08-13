@@ -215,7 +215,7 @@ def plot_all_quadrants(df_in):
     ax.tick_params(axis='both', labelsize=6)
     st.pyplot(fig)
 
-    # ---- Quadrant Definitions (between graph and images expander)
+    # ---- Quadrant Definitions
     st.markdown("### Quadrant Definitions")
     st.markdown(
         """
@@ -282,10 +282,9 @@ else:
     lane_condition = "medium"
 
 # =========================
-# Scoring (z-score based to reduce one-ball dominance)
+# Scoring (role-specific; prevents one-ball dominance)
 # =========================
 def score_ball(row, oil_length, oil_volume, speed, rev_rate, pin_to_pap, lane_friction_index, role):
-    # Normalize cover type
     cover_type_raw = str(row.get('CoverstockType', 'Unknown')).lower()
     is_solid  = "solid"  in cover_type_raw
     is_pearl  = "pearl"  in cover_type_raw
@@ -296,49 +295,45 @@ def score_ball(row, oil_length, oil_volume, speed, rev_rate, pin_to_pap, lane_fr
     diff = float(row['Diff'])
     intdiff = row['IntDiff']
 
-    # Dataset-aware z-scores
-    rg_z   = float(zscore(df['RG']).loc[row.name])     # low RG (negative) = earlier revs
-    diff_z = float(zscore(df['Diff']).loc[row.name])   # high diff (positive) = more flare
+    rg_z   = float(zscore(df['RG']).loc[row.name])     # low RG (neg) = earlier revs
+    diff_z = float(zscore(df['Diff']).loc[row.name])   # high diff (pos) = more flare
 
     friction_adjustment = 1 - (lane_friction_index - 1.0) * 0.2
-
     score = 0.0
 
     if role == "fresh":
-        # Favor low RG (early revs) and higher diff, but through z-scores
-        score += (-rg_z) * 55 * friction_adjustment
-        score += (+diff_z) * 180
-        # Core bias (toned down)
+        # Strong bias to solids; penalize pearls; small asym bonus only on heavy
+        score += (-rg_z) * 60 * friction_adjustment
+        score += (+diff_z) * 140
+        if is_solid: score += 80
+        if is_pearl: score -= 60
+        if is_hybrid and lane_condition == "medium": score += 25
         if intdiff != "Symmetrical Ball":
-            score += 10
-        else:
-            score += 15
-        # Covers by condition
-        if lane_condition == "heavy" and is_solid:
-            score += 40
+            score += 10 if lane_condition == "heavy" else 0
+        # Light fresh: pearls are too clean
         if lane_condition == "light" and (is_pearl or is_urethane):
-            score -= 25
+            score -= 30
 
     elif role == "transition":
-        # Near mid RG and usable flare
+        # Balanced control; hybrids shine; pearls ok; asym toned down (penalty on light)
         mid_rg_pull = 2.50
-        score += (1 - abs(rg - mid_rg_pull) / 0.06) * 50 * friction_adjustment
-        score += (+diff_z) * 90
-        if lane_condition == "medium" and (is_hybrid or is_pearl):
-            score += 30
-        # Hybrids can be too responsive on light/burn
-        if lane_condition == "light" and is_hybrid:
-            score -= 15
+        score += (1 - abs(rg - mid_rg_pull) / 0.06) * 60 * friction_adjustment
+        score += (+diff_z) * 80
+        if is_hybrid: score += 50
+        if is_pearl:  score += 25
+        if is_solid and lane_condition == "medium": score += 10
+        if is_solid and lane_condition == "light":  score -= 15
+        if intdiff != "Symmetrical Ball":
+            score += 5 if lane_condition == "medium" else (-15 if lane_condition == "light" else 0)
 
     elif role == "burned":
-        # Later roll: higher RG and lower diff
-        score += (+rg_z) * 60
-        score += (-diff_z) * 220
-        if lane_condition == "light":
-            if is_pearl or is_urethane:
-                score += 60
-            if is_solid or intdiff != "Symmetrical Ball":
-                score -= 35
+        # Favor delay & smooth: high RG + low diff; pearls/urethane; symmetric > asym
+        score += (+rg_z) * 70
+        score += (-diff_z) * 180
+        if is_pearl or is_urethane: score += 70
+        if is_solid: score -= 40
+        if intdiff != "Symmetrical Ball": score -= 30
+        else: score += 20  # symmetric bonus
 
     # Speed/Rev tuning
     if speed >= 17 and is_solid:
@@ -354,16 +349,35 @@ def score_ball(row, oil_length, oil_volume, speed, rev_rate, pin_to_pap, lane_fr
 
     return score
 
+# Compute scores once for each role
 roles = ["fresh", "transition", "burned"]
-recommendations = {}
 for role in roles:
     df[role + "_score"] = df.apply(
         lambda row: score_ball(row, oil_length, oil_volume, speed, rev_rate, pin_to_pap, lane_friction_index, role),
         axis=1
     )
-    recommendations[role] = df.sort_values(role + "_score", ascending=False).iloc[0]
 
-# Optional: quick visibility into rankings
+# =========================
+# Enforce diversity across roles (no duplicate ball picks)
+# =========================
+recommendations = {}
+remaining = df.copy()
+
+# Fresh pick
+fresh_pick = remaining.sort_values("fresh_score", ascending=False).iloc[0]
+recommendations["fresh"] = fresh_pick
+remaining = remaining[remaining["Name"] != fresh_pick["Name"]]
+
+# Transition pick (without fresh)
+transition_pick = remaining.sort_values("transition_score", ascending=False).iloc[0]
+recommendations["transition"] = transition_pick
+remaining = remaining[remaining["Name"] != transition_pick["Name"]]
+
+# Burned pick (without fresh/transition)
+burned_pick = remaining.sort_values("burned_score", ascending=False).iloc[0]
+recommendations["burned"] = burned_pick
+
+# Optional: visibility into rankings
 with st.expander("🔍 Debug: Top 5 by role"):
     for role in roles:
         cols = ["Name", "RG", "Diff", "IntDiff", "CoverstockType", f"{role}_score"]
@@ -375,14 +389,15 @@ with st.expander("🔍 Debug: Top 5 by role"):
 # Recommended Arsenal
 # =========================
 st.markdown("## 🎳 Recommended Arsenal")
+role_labels = {
+    "fresh": "Fresh Oil (First Ball)",
+    "transition": "Transition (Second Ball)",
+    "burned": "Burned Lanes (Third Ball)"
+}
+
 for idx, role in enumerate(roles):
     ball = recommendations[role]
-    role_label = {
-        "fresh": "Fresh Oil (First Ball)",
-        "transition": "Transition (Second Ball)",
-        "burned": "Burned Lanes (Third Ball)"
-    }
-    st.subheader(role_label[role])
+    st.subheader(role_labels[role])
     st.write(f"**{ball['Name']}**")
     st.write(f"RG: {ball['RG']}, Diff: {ball['Diff']}, IntDiff: {ball['IntDiff']}")
     st.write(f"Coverstock: {ball.get('Coverstock', 'Unknown')} ({ball.get('CoverstockType', 'Unknown')})")
@@ -403,12 +418,14 @@ for idx, role in enumerate(roles):
 # =========================
 st.markdown("<hr style='border:2px solid darkred'>", unsafe_allow_html=True)
 st.subheader("Balls Not Chosen")
+chosen_names = {recommendations[r]["Name"] for r in roles}
 for _, row in df.iterrows():
-    if row['Name'] not in [recommendations[r]['Name'] for r in roles]:
+    if row['Name'] not in chosen_names:
         st.write(f"**{row['Name']}**")
         st.write(f"RG: {row['RG']}, Diff: {row['Diff']}, IntDiff: {row['IntDiff']}")
         st.write(f"Coverstock: {row.get('Coverstock', 'Unknown')} ({row.get('CoverstockType', 'Unknown')})")
-        st.write(f"Score: {max(row['fresh_score'], row['transition_score'], row['burned_score']):.2f}")
+        best_score = max(row['fresh_score'], row['transition_score'], row['burned_score'])
+        st.write(f"Score: {best_score:.2f}")
         st.write(f"Expected ball roll on lane type chosen: {expected_roll(row, lane_friction_index, lane_type, lane_condition)}")
 
         img_path, _ = try_paths_for_image(row.get("Image", ""), row["Name"])
