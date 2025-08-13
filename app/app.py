@@ -93,15 +93,6 @@ def expected_roll(row, lane_friction_index, lane_type, lane_condition):
 
     return "; ".join(parts)
 
-def zscore(series, clip=2.0):
-    """Dataset-aware normalization with gentle clipping."""
-    s = pd.Series(series, dtype=float)
-    sd = s.std(ddof=0)
-    if pd.isna(sd) or sd == 0:
-        return pd.Series([0.0] * len(s), index=s.index)
-    z = (s - s.mean()) / sd
-    return z.clip(-clip, clip)
-
 # =========================
 # Title + Instructions
 # =========================
@@ -215,17 +206,6 @@ def plot_all_quadrants(df_in):
     ax.tick_params(axis='both', labelsize=6)
     st.pyplot(fig)
 
-    # ---- Quadrant Definitions
-    st.markdown("### Quadrant Definitions")
-    st.markdown(
-        """
-- **High RG + Low Diff** — Stores energy longer and transitions later with a smoother, more controlled hook. Useful on dry or late-game conditions.
-- **High RG + High Diff** — Delays roll but creates a strong backend move when it finds friction. Good for angular shapes on medium-to-dry.
-- **Low RG + Low Diff** — Revves up earlier with smoother, more predictable motion. Great for control on tougher/sport conditions.
-- **Low RG + High Diff** — Early revs + maximum flare potential for strong hook and continuation. Works well on fresh/heavier oil.
-        """
-    )
-
     with st.expander("📂 Images directory contents"):
         files = sorted(os.listdir(IMAGES_DIR))
         if not files:
@@ -282,142 +262,81 @@ else:
     lane_condition = "medium"
 
 # =========================
-# Scoring (role-specific; prevents one-ball dominance) + DV8 Chill nudge
+# Scoring
 # =========================
 def score_ball(row, oil_length, oil_volume, speed, rev_rate, pin_to_pap, lane_friction_index, role):
-    cover_type_raw = str(row.get('CoverstockType', 'Unknown')).lower()
-    is_solid  = "solid"  in cover_type_raw
-    is_pearl  = "pearl"  in cover_type_raw
-    is_hybrid = "hybrid" in cover_type_raw
-    is_urethane = "urethane" in cover_type_raw
-
-    rg   = float(row['RG'])
-    diff = float(row['Diff'])
+    rg = row['RG']
+    diff = row['Diff']
     intdiff = row['IntDiff']
-
-    name_l = str(row.get("Name", "")).lower()
-
-    rg_z   = float(zscore(df['RG']).loc[row.name])     # low RG (neg) = earlier revs
-    diff_z = float(zscore(df['Diff']).loc[row.name])   # high diff (pos) = more flare
-
+    cover_type = str(row.get('CoverstockType', 'Unknown')).lower()
+    score = 0
     friction_adjustment = 1 - (lane_friction_index - 1.0) * 0.2
-    score = 0.0
 
     if role == "fresh":
-        # Strong bias to solids; penalize pearls (softened), hybrids okay in medium
-        score += (-rg_z) * 60 * friction_adjustment
-        score += (+diff_z) * 140
-        if is_solid: score += 80
-        if is_pearl: score -= 45  # softened (was -60)
-        if is_hybrid and lane_condition == "medium": score += 25
+        score += (2.60 - rg) * 50 * friction_adjustment
+        score += diff * 300
         if intdiff != "Symmetrical Ball":
-            score += 10 if lane_condition == "heavy" else 0
-        if lane_condition == "light" and (is_pearl or is_urethane):
-            score -= 30
-
+            score += 30
+        if lane_condition == "heavy" and "solid" in cover_type:
+            score += 50
+        if lane_condition == "light" and ("pearl" in cover_type or "urethane" in cover_type):
+            score -= 50
     elif role == "transition":
-        # Balanced control; hybrids shine; pearls get a bit more love
-        mid_rg_pull = 2.50
-        score += (1 - abs(rg - mid_rg_pull) / 0.06) * 60 * friction_adjustment
-        score += (+diff_z) * 80
-        if is_hybrid: score += 50
-        if is_pearl:  score += 35  # bumped from +25
-        if is_solid and lane_condition == "medium": score += 10
-        if is_solid and lane_condition == "light":  score -= 15
-        if intdiff != "Symmetrical Ball":
-            score += 5 if lane_condition == "medium" else (-15 if lane_condition == "light" else 0)
-
+        score += (2.55 - abs(2.50 - rg)) * 40 * friction_adjustment
+        score += diff * 150
+        if lane_condition == "medium" and ("hybrid" in cover_type or "pearl" in cover_type):
+            score += 40
     elif role == "burned":
-        # Favor delay & smooth: high RG + low diff; pearls/urethane; symmetric > asym
-        score += (+rg_z) * 70
-        score += (-diff_z) * 180
-        if is_pearl or is_urethane: score += 70
-        if is_solid: score -= 40
-        if intdiff != "Symmetrical Ball": score -= 30
-        else: score += 20  # symmetric bonus
+        score += rg * 40
+        score += (0.08 - diff) * 300
+        if lane_condition == "light":
+            if "pearl" in cover_type or "urethane" in cover_type:
+                score += 80
+            if "solid" in cover_type or intdiff != "Symmetrical Ball":
+                score -= 50
 
-    # Speed/Rev tuning
-    if speed >= 17 and is_solid:
-        score += 8
-    elif speed <= 13 and (is_pearl or is_urethane):
-        score += 8
+    if speed >= 17 and "solid" in cover_type:
+        score += 10
+    elif speed <= 13 and ("pearl" in cover_type or "urethane" in cover_type):
+        score += 10
 
-    score += (rev_rate / 100.0) * diff * 4.5
-    if pin_to_pap <= 4.0:
-        score += diff * 40
+    score += (rev_rate / 100) * diff * 5
+
+    if pin_to_pap <= 4:
+        score += diff * 50
     else:
-        score += (0.08 - diff) * 40
-
-    # ---- DV8 Chill targeted nudge (fair shot for 1st/2nd)
-    if "dv8" in name_l and "chill" in name_l:
-        if role in ("fresh",):
-            if lane_condition in ("light", "medium"):
-                score += 35
-        if role in ("transition",):
-            score += 55
-            if is_pearl and diff <= 0.042 and rg >= 2.52:
-                score += 20
+        score += (0.08 - diff) * 50
 
     return score
 
-# Compute scores once for each role
 roles = ["fresh", "transition", "burned"]
-for role in roles:
-    df[role + "_score"] = df.apply(
-        lambda row: score_ball(row, oil_length, oil_volume, speed, rev_rate, pin_to_pap, lane_friction_index, role),
-        axis=1
-    )
-
-# =========================
-# Enforce diversity across roles (no duplicate ball picks)
-# =========================
 recommendations = {}
-remaining = df.copy()
-
-# Fresh pick
-fresh_pick = remaining.sort_values("fresh_score", ascending=False).iloc[0]
-recommendations["fresh"] = fresh_pick
-remaining = remaining[remaining["Name"] != fresh_pick["Name"]]
-
-# Transition pick (without fresh)
-transition_pick = remaining.sort_values("transition_score", ascending=False).iloc[0]
-recommendations["transition"] = transition_pick
-remaining = remaining[remaining["Name"] != transition_pick["Name"]]
-
-# Burned pick (without fresh/transition)
-burned_pick = remaining.sort_values("burned_score", ascending=False).iloc[0]
-recommendations["burned"] = burned_pick
-
-# Optional: visibility into rankings
-with st.expander("🔍 Debug: Top 5 by role"):
-    for role in roles:
-        cols = ["Name", "RG", "Diff", "IntDiff", "CoverstockType", f"{role}_score"]
-        top5 = df.sort_values(f"{role}_score", ascending=False)[cols].head(5)
-        st.write(f"**{role.title()}**")
-        st.dataframe(top5, use_container_width=True)
+for role in roles:
+    df[role + "_score"] = df.apply(lambda row: score_ball(row, oil_length, oil_volume, speed, rev_rate, pin_to_pap, lane_friction_index, role), axis=1)
+    recommendations[role] = df.sort_values(role + "_score", ascending=False).iloc[0]
 
 # =========================
 # Recommended Arsenal
 # =========================
 st.markdown("## 🎳 Recommended Arsenal")
-role_labels = {
-    "fresh": "Fresh Oil (First Ball)",
-    "transition": "Transition (Second Ball)",
-    "burned": "Burned Lanes (Third Ball)"
-}
-
 for idx, role in enumerate(roles):
     ball = recommendations[role]
-    st.subheader(role_labels[role])
+    role_label = {
+        "fresh": "Fresh Oil (First Ball)",
+        "transition": "Transition (Second Ball)",
+        "burned": "Burned Lanes (Third Ball)"
+    }
+    st.subheader(role_label[role])
     st.write(f"**{ball['Name']}**")
     st.write(f"RG: {ball['RG']}, Diff: {ball['Diff']}, IntDiff: {ball['IntDiff']}")
     st.write(f"Coverstock: {ball.get('Coverstock', 'Unknown')} ({ball.get('CoverstockType', 'Unknown')})")
     st.write(f"Score: {ball[role + '_score']:.2f}")
     st.write(f"Expected ball roll on lane type chosen: {expected_roll(ball, lane_friction_index, lane_type, lane_condition)}")
 
-    img_path, _ = try_paths_for_image(ball.get("Image", ""), ball["Name"])
-    if img_path:
-        st.image(img_path, caption=ball['Name'], width=250)
+    image_filename = ball['Name'].lower().replace(" ", "_") + ".png"
+    image_path = os.path.join(IMAGES_DIR, image_filename)
+    if os.path.exists(image_path):
+        st.image(image_path, caption=ball['Name'], width=250)
     else:
         st.warning("Ball image not found.")
 
@@ -429,18 +348,17 @@ for idx, role in enumerate(roles):
 # =========================
 st.markdown("<hr style='border:2px solid darkred'>", unsafe_allow_html=True)
 st.subheader("Balls Not Chosen")
-chosen_names = {recommendations[r]["Name"] for r in roles}
 for _, row in df.iterrows():
-    if row['Name'] not in chosen_names:
+    if row['Name'] not in [recommendations[r]['Name'] for r in roles]:
         st.write(f"**{row['Name']}**")
         st.write(f"RG: {row['RG']}, Diff: {row['Diff']}, IntDiff: {row['IntDiff']}")
         st.write(f"Coverstock: {row.get('Coverstock', 'Unknown')} ({row.get('CoverstockType', 'Unknown')})")
-        best_score = max(row['fresh_score'], row['transition_score'], row['burned_score'])
-        st.write(f"Score: {best_score:.2f}")
+        st.write(f"Score: {max(row['fresh_score'], row['transition_score'], row['burned_score']):.2f}")
         st.write(f"Expected ball roll on lane type chosen: {expected_roll(row, lane_friction_index, lane_type, lane_condition)}")
 
-        img_path, _ = try_paths_for_image(row.get("Image", ""), row["Name"])
-        if img_path:
-            st.image(img_path, caption=row['Name'], width=200)
+        image_filename = row['Name'].lower().replace(" ", "_") + ".png"
+        image_path = os.path.join(IMAGES_DIR, image_filename)
+        if os.path.exists(image_path):
+            st.image(image_path, caption=row['Name'], width=200)
         else:
             st.warning("Ball image not found.")
