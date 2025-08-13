@@ -282,7 +282,7 @@ else:
     lane_condition = "medium"
 
 # =========================
-# Scoring (role-specific; prevents one-ball dominance)
+# Scoring (role-specific; prevents one-ball dominance) + DV8 Chill nudge
 # =========================
 def score_ball(row, oil_length, oil_volume, speed, rev_rate, pin_to_pap, lane_friction_index, role):
     cover_type_raw = str(row.get('CoverstockType', 'Unknown')).lower()
@@ -295,6 +295,8 @@ def score_ball(row, oil_length, oil_volume, speed, rev_rate, pin_to_pap, lane_fr
     diff = float(row['Diff'])
     intdiff = row['IntDiff']
 
+    name_l = str(row.get("Name", "")).lower()
+
     rg_z   = float(zscore(df['RG']).loc[row.name])     # low RG (neg) = earlier revs
     diff_z = float(zscore(df['Diff']).loc[row.name])   # high diff (pos) = more flare
 
@@ -302,25 +304,24 @@ def score_ball(row, oil_length, oil_volume, speed, rev_rate, pin_to_pap, lane_fr
     score = 0.0
 
     if role == "fresh":
-        # Strong bias to solids; penalize pearls; small asym bonus only on heavy
+        # Strong bias to solids; penalize pearls (softened), hybrids okay in medium
         score += (-rg_z) * 60 * friction_adjustment
         score += (+diff_z) * 140
         if is_solid: score += 80
-        if is_pearl: score -= 60
+        if is_pearl: score -= 45  # softened (was -60)
         if is_hybrid and lane_condition == "medium": score += 25
         if intdiff != "Symmetrical Ball":
             score += 10 if lane_condition == "heavy" else 0
-        # Light fresh: pearls are too clean
         if lane_condition == "light" and (is_pearl or is_urethane):
             score -= 30
 
     elif role == "transition":
-        # Balanced control; hybrids shine; pearls ok; asym toned down (penalty on light)
+        # Balanced control; hybrids shine; pearls get a bit more love
         mid_rg_pull = 2.50
         score += (1 - abs(rg - mid_rg_pull) / 0.06) * 60 * friction_adjustment
         score += (+diff_z) * 80
         if is_hybrid: score += 50
-        if is_pearl:  score += 25
+        if is_pearl:  score += 35  # bumped from +25
         if is_solid and lane_condition == "medium": score += 10
         if is_solid and lane_condition == "light":  score -= 15
         if intdiff != "Symmetrical Ball":
@@ -346,6 +347,16 @@ def score_ball(row, oil_length, oil_volume, speed, rev_rate, pin_to_pap, lane_fr
         score += diff * 40
     else:
         score += (0.08 - diff) * 40
+
+    # ---- DV8 Chill targeted nudge (fair shot for 1st/2nd)
+    if "dv8" in name_l and "chill" in name_l:
+        if role in ("fresh",):
+            if lane_condition in ("light", "medium"):
+                score += 35
+        if role in ("transition",):
+            score += 55
+            if is_pearl and diff <= 0.042 and rg >= 2.52:
+                score += 20
 
     return score
 
