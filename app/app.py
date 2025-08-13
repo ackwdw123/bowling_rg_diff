@@ -206,6 +206,17 @@ def plot_all_quadrants(df_in):
     ax.tick_params(axis='both', labelsize=6)
     st.pyplot(fig)
 
+    # ---- Quadrant Definitions (inserted here, between graph and images expander) ----
+    st.markdown("### Quadrant Definitions")
+    st.markdown(
+        """
+- **High RG + Low Diff** — Stores energy longer and transitions later with a smoother, more controlled hook. Useful on dry or late-game conditions.
+- **High RG + High Diff** — Delays roll but creates a strong backend move when it finds friction. Good for angular shapes on medium-to-dry.
+- **Low RG + Low Diff** — Revves up earlier with smoother, more predictable motion. Great for control on tougher/sport conditions.
+- **Low RG + High Diff** — Early revs + maximum flare potential for strong hook and continuation. Works well on fresh/heavier oil.
+        """
+    )
+
     with st.expander("📂 Images directory contents"):
         files = sorted(os.listdir(IMAGES_DIR))
         if not files:
@@ -333,10 +344,10 @@ for idx, role in enumerate(roles):
     st.write(f"Score: {ball[role + '_score']:.2f}")
     st.write(f"Expected ball roll on lane type chosen: {expected_roll(ball, lane_friction_index, lane_type, lane_condition)}")
 
-    image_filename = ball['Name'].lower().replace(" ", "_") + ".png"
-    image_path = os.path.join(IMAGES_DIR, image_filename)
-    if os.path.exists(image_path):
-        st.image(image_path, caption=ball['Name'], width=250)
+    # Robust image resolution (CSV Image column or slug fallback)
+    img_path, _ = try_paths_for_image(ball.get("Image", ""), ball["Name"])
+    if img_path:
+        st.image(img_path, caption=ball['Name'], width=250)
     else:
         st.warning("Ball image not found.")
 
@@ -356,10 +367,8 @@ for _, row in df.iterrows():
         st.write(f"Score: {max(row['fresh_score'], row['transition_score'], row['burned_score']):.2f}")
         st.write(f"Expected ball roll on lane type chosen: {expected_roll(row, lane_friction_index, lane_type, lane_condition)}")
 
-        image_filename = row['Name'].lower().replace(" ", "_") + ".png"
-        image_path = os.path.join(IMAGES_DIR, image_filename)
-        if os.path.exists(image_path):
-            st.image(image_path, caption=row['Name'], width=200)
+        img_path, _ = try_paths_for_image(row.get("Image", ""), row["Name"])
+        if img_path:
+            st.image(img_path, caption=row['Name'], width=200)
         else:
             st.warning("Ball image not found.")
-
